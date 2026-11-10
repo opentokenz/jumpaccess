@@ -13,6 +13,7 @@ JumpAccess 是一个面向 [JumpServer](https://github.com/jumpserver/jumpserver
 ## 项目目标
 
 - 不依赖 JumpServer 桌面 Client，独立完成浏览器 OAuth 登录和 Token 生命周期管理。
+- OAuth Discovery 不可用的站点可以导入浏览器 Cookie 会话，并通过 KoKo Web 终端交互；终端流支持 ZMODEM 上传下载。
 - 以 SSH 客户端方式直接连接远程 Asset。
 - 作为通用 SSH `ProxyCommand` 被兼容的终端或 SSH 客户端调用，不与某个具体终端产品耦合。
 - 通过 TOML 管理多个 JumpServer Profile 以及 Asset 别名等非敏感配置。
@@ -86,6 +87,20 @@ go install github.com/cmstar/jumpaccess/cmd/jumpctl@latest
 ```powershell
 go install ./cmd/jumpctl
 ```
+
+也可以使用仓库脚本把二进制安装到 `~/.local/bin`（可用 `BIN_DIR` 指定其他目录）：
+
+```bash
+./scripts/install.sh
+```
+
+脚本从当前源码构建，版本号取 `git describe --tags --always --dirty`，先写临时文件再原子替换。安装完成后打印目标路径和 `jumpctl version`；`~/.local/bin` 不在 `PATH` 时会提示。卸载只删除该二进制：
+
+```bash
+./scripts/uninstall.sh
+```
+
+Profile、Alias 和凭据保存在应用数据目录，脚本不会删除；需要时按脚本输出的路径手动清理。
 
 若没有 Go 环境，可以从发布页直接下载对应平台的 CLI 归档；Linux 使用 `jumpctl-v版本号-linux-amd64.tar.gz` 或 `jumpctl-v版本号-linux-arm64.tar.gz`。Linux 正式支持 Ubuntu 24.04 LTS；Ubuntu 22.04 LTS 预期兼容，但在纳入持续集成验证前不作为正式支持基线。未列出的更新 LTS 版本也须验证后才进入支持范围。下载后，若需要全局可用，需自行添加到 `PATH` 环境变量。
 
@@ -182,6 +197,15 @@ Host production-web
 `auth login` 默认使用手工回调：浏览器完成授权后，不要点击确认页的“确认”，而是复制页面中的 `jms://` 链接或浏览器地址栏的完整确认页 URL，粘贴到等待中的终端。`--manual` 可显式固定这一行为，供官方客户端仍占用协议或系统不允许注册协议时使用。
 
 本机没有可用浏览器时，运行 `jumpctl auth login --profile work --no-browser`。程序只打印授权地址并等待粘贴回调，可把地址复制到另一台能访问 JumpServer 的电脑上完成授权，再把回调粘贴回原终端。无需同时指定 `--manual`；保留原登录进程，Token 会保存在运行 CLI 的机器上。该流程支持 Windows、macOS 和 Linux amd64/arm64。
+
+OAuth Discovery 不可用或 JumpServer SSH 端口不可达时，可以改用浏览器 Cookie 会话与 KoKo Web 终端：
+
+```text
+jumpctl auth import-cookie
+jumpctl webssh app-1 --account root
+```
+
+`import-cookie` 隐藏读取浏览器 Cookie 请求头，验证通过后保存到该 Profile 的私有凭据存储；`jumpctl auth check` 可随时验证会话，`auth status` 显示导入与最近校验时间。`webssh` 通过 `/koko/ws/terminal/` 建立交互式终端，不经过 SSH 2222；终端流识别 ZMODEM，远端 `rz` 上传、`sz` 下载，`--download-dir` 指定下载目录。目标站点使用 HTTP 时，Cookie 与终端内容在内网明文传输，VPN 不能替代 HTTPS。详见[命令参考](docs/cli.md#web-终端koko)。
 
 桌面 GUI 只要保持运行，就会按配置周期检查所有已保存 Refresh Token 的 Profile，并在 Access Token 临近过期时自动刷新；运行期间新增登录无需重启 GUI。Refresh Token 已过期或被撤销时仍需重新登录。
 

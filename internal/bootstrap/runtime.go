@@ -34,7 +34,9 @@ type Runtime struct {
 	HTTPClient    *http.Client
 	Tokens        credential.Repository
 	AuthManager   authapp.Manager
+	Sessions      authapp.Sessions
 	Auth          authapp.Service
+	Cookies       authapp.CookieService
 	Connect       connectapp.Service
 	Resources     resourcesapp.Service
 	Settings      settingsapp.Service
@@ -80,27 +82,48 @@ func New(options Options) (Runtime, error) {
 		}
 		return (oauth.Client{HTTPClient: httpClient, Metadata: metadata}).Revoke(ctx, value)
 	}
+	validateSession := func(ctx context.Context, site string, session credential.Session) (string, error) {
+		client, err := jumpserver.NewSessionClient(site, session, "", httpClient)
+		if err != nil {
+			return "", err
+		}
+		return client.ValidateSession(ctx)
+	}
 	authService := authapp.Service{
 		Config:          store,
 		Tokens:          tokens,
+		Cookies:         tokens,
 		Manager:         manager,
 		LoginFlow:       options.LoginFlow,
 		ManualLoginFlow: options.ManualLoginFlow,
 		Revoke:          revoke,
+		Validate:        validateSession,
 		Timeout:         configuration.Behavior.OAuthTimeout.Duration,
 	}
+	sessions := authapp.Sessions{Tokens: manager, Cookies: tokens}
+	cookieService := authapp.CookieService{
+		Config:  store,
+		Cookies: tokens,
+		Validate: func(ctx context.Context, site string, session credential.CookieSession) (string, error) {
+			return validateSession(ctx, site, credential.Session{Cookie: session})
+		},
+	}
+	newAPI := func(site string, session credential.Session, organization string) (*jumpserver.Client, error) {
+		return jumpserver.NewSessionClient(site, session, organization, httpClient)
+	}
 	connectService := connectapp.Service{
-		Config: store,
-		Tokens: manager,
-		NewAPI: func(site, accessToken, organization string) (connectapp.API, error) {
-			return jumpserver.NewClient(site, accessToken, organization, httpClient)
+		Config:   store,
+		Sessions: sessions,
+		Cookies:  sessions,
+		NewAPI: func(site string, session credential.Session, organization string) (connectapp.API, error) {
+			return newAPI(site, session, organization)
 		},
 	}
 	resourceService := resourcesapp.Service{
-		Config: store,
-		Tokens: manager,
-		NewAPI: func(site, accessToken, organization string) (resourcesapp.API, error) {
-			return jumpserver.NewClient(site, accessToken, organization, httpClient)
+		Config:   store,
+		Sessions: sessions,
+		NewAPI: func(site string, session credential.Session, organization string) (resourcesapp.API, error) {
+			return newAPI(site, session, organization)
 		},
 	}
 	return Runtime{
@@ -111,7 +134,9 @@ func New(options Options) (Runtime, error) {
 		HTTPClient:    httpClient,
 		Tokens:        tokens,
 		AuthManager:   manager,
+		Sessions:      sessions,
 		Auth:          authService,
+		Cookies:       cookieService,
 		Connect:       connectService,
 		Resources:     resourceService,
 		Settings:      settingsapp.Service{Store: store, Credentials: tokens, Locker: manager.Locker},

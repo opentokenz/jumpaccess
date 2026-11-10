@@ -13,12 +13,12 @@ type staticConfig struct{ value projectconfig.Config }
 
 func (s staticConfig) Load() (projectconfig.Config, error) { return s.value, nil }
 
-type staticTokens struct{}
+type staticSessions struct{}
 
-type foreignTokens struct{}
+type foreignSessions struct{}
 
-func (foreignTokens) EnsureFresh(context.Context, string) (credential.Token, error) {
-	return credential.Token{AccessToken: "fixture", Site: "https://old.example.test"}, nil
+func (foreignSessions) Ensure(context.Context, string, string) (credential.Session, error) {
+	return credential.Session{Token: credential.Token{AccessToken: "fixture", Site: "https://old.example.test"}}, nil
 }
 
 func TestResourceRequestsRejectCredentialFromAnotherSite(t *testing.T) {
@@ -26,14 +26,14 @@ func TestResourceRequestsRejectCredentialFromAnotherSite(t *testing.T) {
 	configuration.CurrentProfile = "work"
 	configuration.Profiles["work"] = projectconfig.Profile{URL: "https://new.example.test"}
 	called := false
-	service := Service{Config: staticConfig{value: configuration}, Tokens: foreignTokens{}, NewAPI: func(string, string, string) (API, error) { called = true; return fakeAPI{}, nil }}
+	service := Service{Config: staticConfig{value: configuration}, Sessions: foreignSessions{}, NewAPI: func(string, credential.Session, string) (API, error) { called = true; return fakeAPI{}, nil }}
 	if _, err := service.ListOrganizations(context.Background(), "work"); err == nil || called {
 		t.Fatal("foreign credential reached API factory")
 	}
 }
 
-func (staticTokens) EnsureFresh(context.Context, string) (credential.Token, error) {
-	return credential.Token{AccessToken: "access", Site: "https://jump.example.test"}, nil
+func (staticSessions) Ensure(context.Context, string, string) (credential.Session, error) {
+	return credential.Session{Token: credential.Token{AccessToken: "access", Site: "https://jump.example.test"}}, nil
 }
 
 type fakeAPI struct {
@@ -58,6 +58,10 @@ func (f fakeAPI) GetAsset(context.Context, string) (jumpserver.AssetDetail, erro
 	return f.detail, nil
 }
 
+func (f fakeAPI) ValidateSession(context.Context) (string, error) {
+	return "root", nil
+}
+
 func TestServiceListsResourcesUsingSelectedProfileAndOrganization(t *testing.T) {
 	configuration := projectconfig.Default()
 	configuration.CurrentProfile = "work"
@@ -69,10 +73,10 @@ func TestServiceListsResourcesUsingSelectedProfileAndOrganization(t *testing.T) 
 		assetQuery:    &assetQuery,
 	}
 	service := Service{
-		Config: staticConfig{value: configuration}, Tokens: staticTokens{},
-		NewAPI: func(site, accessToken, organization string) (API, error) {
-			if site != "https://jump.example.test" || accessToken != "access" || (organization != "org-explicit" && organization != "") {
-				t.Fatalf("factory args = %q %q %q", site, accessToken, organization)
+		Config: staticConfig{value: configuration}, Sessions: staticSessions{},
+		NewAPI: func(site string, session credential.Session, organization string) (API, error) {
+			if site != "https://jump.example.test" || session.Token.AccessToken != "access" || (organization != "org-explicit" && organization != "") {
+				t.Fatalf("factory args = %q %q %q", site, session.Token.AccessToken, organization)
 			}
 			return api, nil
 		},
@@ -99,7 +103,7 @@ func TestServiceFindAssetReturnsExactDetailForAccountDiscovery(t *testing.T) {
 		page:   jumpserver.AssetPage{Results: []jumpserver.Asset{{ID: "asset-1", Name: "web"}}},
 		detail: jumpserver.AssetDetail{Asset: jumpserver.Asset{ID: "asset-1", Name: "web"}, Accounts: []jumpserver.Account{{ID: "account-1", Username: "root"}}},
 	}
-	service := Service{Config: staticConfig{value: configuration}, Tokens: staticTokens{}, NewAPI: func(string, string, string) (API, error) { return api, nil }}
+	service := Service{Config: staticConfig{value: configuration}, Sessions: staticSessions{}, NewAPI: func(string, credential.Session, string) (API, error) { return api, nil }}
 
 	asset, err := service.FindAsset(context.Background(), "", "", "web")
 	if err != nil {
@@ -115,7 +119,7 @@ func TestGetAssetByIDNeverFallsBackToNameSearch(t *testing.T) {
 	configuration.Profiles["work"] = projectconfig.Profile{URL: "https://jump.example.test"}
 	query := jumpserver.AssetQuery{}
 	api := fakeAPI{detail: jumpserver.AssetDetail{Asset: jumpserver.Asset{ID: "asset-1"}}, assetQuery: &query}
-	service := Service{Config: staticConfig{value: configuration}, Tokens: staticTokens{}, NewAPI: func(string, string, string) (API, error) { return api, nil }}
+	service := Service{Config: staticConfig{value: configuration}, Sessions: staticSessions{}, NewAPI: func(string, credential.Session, string) (API, error) { return api, nil }}
 	asset, err := service.GetAssetByID(context.Background(), "work", "org", "asset-1")
 	if err != nil || asset.ID != "asset-1" || query != (jumpserver.AssetQuery{}) {
 		t.Fatal("按 ID 查询改变为名称搜索", err)

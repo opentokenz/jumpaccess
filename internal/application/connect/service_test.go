@@ -18,13 +18,18 @@ type staticConfig struct{ value projectconfig.Config }
 
 func (s staticConfig) Load() (projectconfig.Config, error) { return s.value, nil }
 
-type staticTokens struct{ token credential.Token }
+type staticSessions struct{ token credential.Token }
 
-func (s staticTokens) EnsureFresh(context.Context, string) (credential.Token, error) {
-	return s.token, nil
+func (s staticSessions) Ensure(_ context.Context, profile, site string) (credential.Session, error) {
+	if s.token.Site != "" && s.token.Site != site {
+		return credential.Session{}, fmt.Errorf("credential site %q does not match %q", s.token.Site, site)
+	}
+	return credential.Session{Token: s.token}, nil
 }
 
 type fakeAPI struct {
+	validated         bool
+	validateErr       error
 	page              jumpserver.AssetPage
 	detail            jumpserver.AssetDetail
 	connection        jumpserver.ClientConnection
@@ -56,6 +61,14 @@ func (f *fakeAPI) GetClientConnection(context.Context, string) (jumpserver.Clien
 	return f.connection, nil
 }
 
+func (f *fakeAPI) ValidateSession(context.Context) (string, error) {
+	f.validated = true
+	if f.validateErr != nil {
+		return "", f.validateErr
+	}
+	return "root", nil
+}
+
 func TestPrepareResolvesAliasAccountAndReturnsGatewayCredential(t *testing.T) {
 	configuration := projectconfig.Default()
 	configuration.CurrentProfile = "work"
@@ -75,10 +88,10 @@ func TestPrepareResolvesAliasAccountAndReturnsGatewayCredential(t *testing.T) {
 		connection: jumpserver.ClientConnection{Protocol: "ssh", Endpoint: jumpserver.Endpoint{Host: "gateway.example.test", Port: 2222}, Token: jumpserver.ConnectionCredential{ID: "connection-1", Value: "secret"}},
 	}
 	service := Service{
-		Config: staticConfig{value: configuration}, Tokens: staticTokens{token: credential.Token{AccessToken: "oauth-access", Site: "https://jump.example.test"}},
-		NewAPI: func(site, accessToken, organization string) (API, error) {
-			if site != "https://jump.example.test" || accessToken != "oauth-access" || organization != "org-1" {
-				t.Fatalf("factory arguments = %q %q %q", site, accessToken, organization)
+		Config: staticConfig{value: configuration}, Sessions: staticSessions{token: credential.Token{AccessToken: "oauth-access", Site: "https://jump.example.test"}},
+		NewAPI: func(site string, session credential.Session, organization string) (API, error) {
+			if site != "https://jump.example.test" || session.Token.AccessToken != "oauth-access" || organization != "org-1" {
+				t.Fatalf("factory arguments = %q %q %q", site, session.Token.AccessToken, organization)
 			}
 			return api, nil
 		},
@@ -91,7 +104,7 @@ func TestPrepareResolvesAliasAccountAndReturnsGatewayCredential(t *testing.T) {
 	if prepared.Asset.ID != "asset-1" || prepared.Account.ID != "account-1" || prepared.Connection.Endpoint.Host != "gateway.example.test" {
 		t.Fatalf("prepared = %#v", prepared)
 	}
-	if api.connectionRequest.Asset != "asset-1" || api.connectionRequest.Account != "account-1" {
+	if api.connectionRequest.Asset != "asset-1" || api.connectionRequest.Account != "root" {
 		t.Fatalf("connection request = %#v", api.connectionRequest)
 	}
 }
@@ -289,8 +302,8 @@ func testService() (Service, *fakeAPI) {
 		connection: jumpserver.ClientConnection{Protocol: "ssh", Endpoint: jumpserver.Endpoint{Host: "gateway", Port: 22}, Token: jumpserver.ConnectionCredential{ID: "id", Value: "secret"}},
 	}
 	service := Service{
-		Config: staticConfig{value: configuration}, Tokens: staticTokens{token: credential.Token{AccessToken: "access", Site: "https://jump.example.test"}},
-		NewAPI: func(string, string, string) (API, error) { return api, nil },
+		Config: staticConfig{value: configuration}, Sessions: staticSessions{token: credential.Token{AccessToken: "access", Site: "https://jump.example.test"}},
+		NewAPI: func(string, credential.Session, string) (API, error) { return api, nil },
 	}
 	return service, api
 }

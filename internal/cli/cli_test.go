@@ -21,6 +21,14 @@ type fakeAuthService struct {
 	status         authapp.Status
 	refreshProfile string
 	logoutProfile  string
+	checkProfile   string
+	checkResult    authapp.CheckResult
+	checkErr       error
+}
+
+func (f *fakeAuthService) Check(_ context.Context, profile string) (authapp.CheckResult, error) {
+	f.checkProfile = profile
+	return f.checkResult, f.checkErr
 }
 
 type fakeConnectionPreparer struct {

@@ -23,6 +23,7 @@
 | --- | --- | --- |
 | Agent MCP 接入 | [Agent MCP 接入设计](agent-mcp.md) | CLI／GUI 共用服务、配置和日志；支持名称直连、当前 Profile 默认值与唯一目标解析；请求重试固定首次解析结果，文件传输详见独立方案 |
 | Agent MCP 文件传输 | [Agent MCP 文件传输设计](agent-mcp-file-transfer.md) | CLI／GUI 共用下载、本机上传及 HTTP 中转；接收与提交分别去重，远端共用暂存还原和排他发布；已完成 Windows 两个宿主的真实 JumpServer HTTP 上传验收，其他环境见验收范围 |
+| KoKo Web 终端与 Cookie 认证 | [KoKo Web 终端与 Cookie 认证](koko-web-terminal.md) | `jumpctl auth import-cookie` 与 `jumpctl webssh` 已实现，基于 KoKo v4.0.2 源码分析；共享认证层支持 Cookie，单元测试覆盖协议交互；尚未在真实 JumpServer 环境完成验收 |
 | Linux CLI 支持 | [Linux CLI 支持设计](linux-support.md) | 平台适配与发布流程已接入；保留 2026-11-04 原生 CI／WSL2 验收记录，合并 MCP 后的验证范围单独记于 2026-11-05 |
 
 ## 历史版本索引

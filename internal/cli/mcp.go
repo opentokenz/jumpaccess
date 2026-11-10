@@ -15,10 +15,18 @@ import (
 )
 
 func newMCPCommand(deps Dependencies) *cobra.Command {
-	command := &cobra.Command{Use: "mcp", Short: "启动和管理 MCP 服务"}
+	command := &cobra.Command{
+		Use:   "mcp",
+		Short: "Run and manage the MCP server",
+		Long: `Run and manage the shared Streamable HTTP MCP server.
+
+The server uses the same profiles and credentials as other commands and requires a
+completed login for the selected profile. MCP connections use the JumpServer SSH
+gateway; a profile authenticated only by an imported cookie session is not supported.`,
+	}
 	command.AddCommand(newMCPServeCommand(deps))
 	command.AddCommand(&cobra.Command{
-		Use: "status", Short: "查看 MCP 服务运行状态", Args: cobra.NoArgs,
+		Use: "status", Short: "Show MCP server status", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			status, err := readMCPStatus(cmd.Context(), deps)
 			if err != nil {
@@ -44,8 +52,11 @@ func newMCPCommand(deps Dependencies) *cobra.Command {
 	var values config.MCP
 	var rotateToken, noTLS bool
 	configuration := &cobra.Command{
-		Use: "config", Short: "查看或修改 MCP 配置（包含明文 Token）", Args: cobra.NoArgs,
-		Long: "不带修改选项时显示配置；指定修改选项时统一校验、保存并显示全部配置。Token 以明文显示。",
+		Use: "config", Short: "Show or change MCP settings (the access token is shown in clear text)", Args: cobra.NoArgs,
+		Long: "Without options, print the current settings. With options, validate, save, and print all settings. The token is shown in clear text.",
+		Example: `  jumpctl mcp config
+  jumpctl mcp config --port 39287 --allow-lan=false
+  jumpctl mcp config --rotate-token`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			modified := false
 			for _, name := range []string{"listen-host", "port", "allow-lan", "tls-cert", "tls-key", "no-tls", "token", "rotate-token"} {
@@ -104,14 +115,14 @@ func newMCPCommand(deps Dependencies) *cobra.Command {
 			return nil
 		},
 	}
-	configuration.Flags().StringVar(&values.ListenHost, "listen-host", "127.0.0.1", "监听 IP 或 localhost")
-	configuration.Flags().IntVar(&values.Port, "port", 39287, "监听端口（1–65535）")
-	configuration.Flags().BoolVar(&values.AllowLAN, "allow-lan", false, "允许局域网访问（关闭使用 --allow-lan=false）")
-	configuration.Flags().StringVar(&values.TLSCert, "tls-cert", "", "TLS 证书路径")
-	configuration.Flags().StringVar(&values.TLSKey, "tls-key", "", "TLS 私钥路径")
-	configuration.Flags().BoolVar(&noTLS, "no-tls", false, "同时清除 TLS 证书和私钥配置")
-	configuration.Flags().StringVar(&values.Token, "token", "", "设置 MCP 访问 Token")
-	configuration.Flags().BoolVar(&rotateToken, "rotate-token", false, "首次生成或替换 MCP 访问 Token")
+	configuration.Flags().StringVar(&values.ListenHost, "listen-host", "127.0.0.1", "listen address (IP or localhost)")
+	configuration.Flags().IntVar(&values.Port, "port", 39287, "listen port (1-65535)")
+	configuration.Flags().BoolVar(&values.AllowLAN, "allow-lan", false, "allow LAN access (disable with --allow-lan=false)")
+	configuration.Flags().StringVar(&values.TLSCert, "tls-cert", "", "TLS certificate path")
+	configuration.Flags().StringVar(&values.TLSKey, "tls-key", "", "TLS private key path")
+	configuration.Flags().BoolVar(&noTLS, "no-tls", false, "clear the TLS certificate and key settings")
+	configuration.Flags().StringVar(&values.Token, "token", "", "set the MCP access token")
+	configuration.Flags().BoolVar(&rotateToken, "rotate-token", false, "generate or replace the MCP access token")
 	configuration.MarkFlagsMutuallyExclusive("token", "rotate-token")
 	configuration.MarkFlagsMutuallyExclusive("no-tls", "tls-cert")
 	configuration.MarkFlagsMutuallyExclusive("no-tls", "tls-key")

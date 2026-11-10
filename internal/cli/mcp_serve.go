@@ -35,7 +35,8 @@ func newMCPServeCommand(deps Dependencies) *cobra.Command {
 	level, color := "standard", "auto"
 	command := &cobra.Command{
 		Use:           "serve",
-		Short:         "前台运行 MCP 服务并持续输出日志",
+		Short:         "Run the MCP server in the foreground with streaming logs",
+		Example:       `  jumpctl mcp serve --log-level detailed`,
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -61,8 +62,8 @@ func newMCPServeCommand(deps Dependencies) *cobra.Command {
 			return serveMCP(ctx, deps.MCP, output, detail)
 		},
 	}
-	command.Flags().StringVar(&level, "log-level", "standard", "日志详细程度：minimal、standard、detailed")
-	command.Flags().StringVar(&color, "color", "auto", "ANSI 颜色：auto、always、never")
+	command.Flags().StringVar(&level, "log-level", "standard", "log detail: minimal, standard, or detailed")
+	command.Flags().StringVar(&color, "color", "auto", "ANSI color: auto, always, or never")
 	return command
 }
 

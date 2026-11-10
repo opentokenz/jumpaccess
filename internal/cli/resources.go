@@ -18,7 +18,12 @@ func newResourceCommands(deps Dependencies) []*cobra.Command {
 
 func newOrganizationCommand(deps Dependencies) *cobra.Command {
 	var profile string
-	command := &cobra.Command{Use: "organization", Aliases: []string{"org"}, Short: "Inspect permitted JumpServer organizations"}
+	command := &cobra.Command{
+		Use:     "organization",
+		Aliases: []string{"org"},
+		Short:   "Inspect permitted JumpServer organizations",
+		Long:    "Inspect organizations visible to the current user.",
+	}
 	list := &cobra.Command{
 		Use:   "list",
 		Short: "List permitted organizations",
@@ -56,11 +61,20 @@ func newAssetCommand(deps Dependencies) *cobra.Command {
 	var search string
 	var offset int
 	var limit int
-	command := &cobra.Command{Use: "asset", Short: "Inspect permitted JumpServer assets"}
+	command := &cobra.Command{
+		Use:   "asset",
+		Short: "Inspect permitted JumpServer assets",
+		Long: `Inspect assets permitted to the current user.
+
+Asset references accept an exact ID, name, or address. Use --organization when
+permissions span organizations.`,
+	}
 	list := &cobra.Command{
 		Use:   "list",
 		Short: "List permitted assets",
-		Args:  cobra.NoArgs,
+		Example: `  jumpctl asset list --profile work
+  jumpctl asset list --profile work --search web --limit 20`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if offset < 0 {
 				return fmt.Errorf("--offset must be greater than or equal to 0")
@@ -96,11 +110,16 @@ func newAssetCommand(deps Dependencies) *cobra.Command {
 func newAccountCommand(deps Dependencies) *cobra.Command {
 	var profile string
 	var organization string
-	command := &cobra.Command{Use: "account", Short: "Inspect permitted JumpServer accounts"}
+	command := &cobra.Command{
+		Use:   "account",
+		Short: "Inspect permitted JumpServer accounts",
+		Long:  "Inspect the accounts permitted on one asset, identified by its exact ID.",
+	}
 	list := &cobra.Command{
-		Use:   "list <asset>",
-		Short: "List permitted accounts for one exact asset",
-		Args:  cobra.ExactArgs(1),
+		Use:     "list <asset>",
+		Short:   "List permitted accounts for one exact asset",
+		Example: `  jumpctl account list 3f2a1c9e-8b7d-4c6a-9f0e-1a2b3c4d5e6f --profile work`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			service, err := requireResources(deps)
 			if err != nil {

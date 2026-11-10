@@ -20,6 +20,11 @@ type Status struct {
 	Expired          bool
 	RefreshAvailable bool
 	ExpiresAt        time.Time
+
+	CookieImported    bool
+	CookieImportedAt  time.Time
+	CookieValidatedAt time.Time
+	CookieSite        string
 }
 
 type LoginOptions struct {
@@ -30,13 +35,16 @@ type LoginOptions struct {
 type Service struct {
 	Config    ConfigLoader
 	Tokens    TokenRepository
+	Cookies   CookieRepository
 	Manager   Manager
 	LoginFlow func(context.Context, string, LoginOptions) (credential.Token, error)
 	// ManualLoginFlow 是其他程序占用私有协议或系统禁止注册协议时永久保留的回退方式。
 	ManualLoginFlow func(context.Context, string, LoginOptions) (credential.Token, error)
 	Revoke          func(context.Context, credential.Token) error
-	Now             func() time.Time
-	Timeout         time.Duration
+	// Validate 用用户资料接口确认当前会话有效，供 Cookie 导入和 auth check 使用。
+	Validate func(context.Context, string, credential.Session) (string, error)
+	Now      func() time.Time
+	Timeout  time.Duration
 }
 
 func (s Service) Login(ctx context.Context, requestedProfile string, options LoginOptions) (Status, error) {
@@ -79,15 +87,76 @@ func (s Service) Status(requestedProfile string) (Status, error) {
 	}
 	token, err := s.Tokens.Load(profile)
 	if errors.Is(err, credential.ErrNotFound) {
-		return Status{Profile: profile}, nil
+		return s.withCookie(profile, Status{Profile: profile})
 	}
 	if err != nil {
 		return Status{}, fmt.Errorf("load OAuth credential: %w", err)
 	}
+	status := s.statusFor(profile, token)
 	if err := ValidateTokenSite(token, configured.URL); err != nil {
-		return Status{Profile: profile}, nil
+		return s.withCookie(profile, Status{Profile: profile})
 	}
-	return s.statusFor(profile, token), nil
+	return status, nil
+}
+
+// CheckResult 是一次网络校验的结果，mode 为 oauth 或 cookie。
+type CheckResult struct {
+	Profile     string
+	Mode        string
+	User        string
+	ValidatedAt time.Time
+}
+
+// Check 立即用用户资料接口验证当前认证方式；Cookie 会话校验成功后记录时间。
+func (s Service) Check(ctx context.Context, requestedProfile string) (CheckResult, error) {
+	profile, configured, err := s.resolveProfile(requestedProfile)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	if s.Validate == nil {
+		return CheckResult{}, fmt.Errorf("session validation is unavailable")
+	}
+	session, err := (Sessions{Tokens: s.Manager, Cookies: s.Cookies}).Ensure(ctx, profile, configured.URL)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	user, err := s.Validate(ctx, configured.URL, session)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	result := CheckResult{Profile: profile, Mode: "oauth", User: user}
+	if !session.IsCookie() {
+		return result, nil
+	}
+	result.Mode = "cookie"
+	cookie := session.Cookie
+	cookie.ValidatedAt = s.now()
+	if s.Cookies != nil {
+		if err := s.Cookies.SaveCookie(profile, cookie); err != nil {
+			return CheckResult{}, fmt.Errorf("save cookie validation time: %w", err)
+		}
+	}
+	result.ValidatedAt = cookie.ValidatedAt
+	return result, nil
+}
+
+// withCookie 只补充 Cookie 会话的存在信息，不在 status 中发起网络校验。
+func (s Service) withCookie(profile string, status Status) (Status, error) {
+	if s.Cookies == nil {
+		return status, nil
+	}
+	cookie, err := s.Cookies.LoadCookie(profile)
+	if errors.Is(err, credential.ErrNotFound) {
+		return status, nil
+	}
+	if err != nil {
+		return Status{}, fmt.Errorf("load cookie session: %w", err)
+	}
+	status.CookieImported = true
+	status.CookieImportedAt = cookie.ImportedAt
+	status.CookieValidatedAt = cookie.ValidatedAt
+	status.CookieSite = cookie.Site
+	return status, nil
 }
 
 func (s Service) Refresh(ctx context.Context, requestedProfile string) (Status, error) {
@@ -106,6 +175,12 @@ func (s Service) Logout(ctx context.Context, requestedProfile string) error {
 	profile, _, err := s.resolveProfile(requestedProfile)
 	if err != nil {
 		return err
+	}
+	// Cookie 会话只有本地副本，优先清理，避免 OAuth 注销失败时遗留可用的浏览器会话。
+	if s.Cookies != nil {
+		if err := s.Cookies.DeleteCookie(profile); err != nil && !errors.Is(err, credential.ErrNotFound) {
+			return fmt.Errorf("delete cookie session: %w", err)
+		}
 	}
 	unlock, err := LockProfile(ctx, s.Manager.Locker, profile)
 	if err != nil {
@@ -131,7 +206,11 @@ func (s Service) Logout(ctx context.Context, requestedProfile string) error {
 }
 
 func (s Service) resolveProfile(requested string) (string, projectconfig.Profile, error) {
-	value, err := s.Config.Load()
+	return resolveProfile(s.Config, requested)
+}
+
+func resolveProfile(config ConfigLoader, requested string) (string, projectconfig.Profile, error) {
+	value, err := config.Load()
 	if err != nil {
 		return "", projectconfig.Profile{}, err
 	}
@@ -150,10 +229,7 @@ func (s Service) resolveProfile(requested string) (string, projectconfig.Profile
 }
 
 func (s Service) statusFor(profile string, token credential.Token) Status {
-	now := time.Now()
-	if s.Now != nil {
-		now = s.Now()
-	}
+	now := s.now()
 	return Status{
 		Profile:          profile,
 		LoggedIn:         true,
@@ -161,4 +237,11 @@ func (s Service) statusFor(profile string, token credential.Token) Status {
 		RefreshAvailable: token.RefreshToken != "",
 		ExpiresAt:        token.ExpiresAt,
 	}
+}
+
+func (s Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }

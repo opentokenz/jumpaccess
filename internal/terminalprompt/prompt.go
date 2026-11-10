@@ -3,10 +3,12 @@ package terminalprompt
 import (
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 
 	"github.com/cmstar/jumpaccess/internal/jumpserver"
+	"golang.org/x/term"
 )
 
 func SelectAccount(input io.Reader, output io.Writer, accounts []jumpserver.Account) (jumpserver.Account, error) {
@@ -85,4 +87,32 @@ func readLine(input io.Reader) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("input line is too long")
+}
+
+// ReadSecret 从终端隐藏读取一次性输入，用于粘贴 Cookie 等凭据。
+// 非终端输入直接拒绝，避免凭据被回显或留在管道中。
+func ReadSecret(input *os.File, output io.Writer, prompt string) (string, error) {
+	if input == nil {
+		return "", fmt.Errorf("standard input is unavailable")
+	}
+	fd := int(input.Fd())
+	if !term.IsTerminal(fd) {
+		return "", fmt.Errorf("standard input is not a terminal; cannot read the cookie without echo protection")
+	}
+	if _, err := fmt.Fprint(output, prompt); err != nil {
+		return "", err
+	}
+	data, err := term.ReadPassword(fd)
+	if _, writeErr := fmt.Fprintln(output); writeErr != nil && err == nil {
+		err = writeErr
+	}
+	if err != nil {
+		return "", fmt.Errorf("read hidden input: %w", err)
+	}
+	value := strings.TrimSpace(string(data))
+	clear(data)
+	if value == "" {
+		return "", fmt.Errorf("input is empty")
+	}
+	return value, nil
 }

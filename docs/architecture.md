@@ -66,8 +66,9 @@ JumpAccess 使用单个 Go module `github.com/cmstar/jumpaccess` 承载共享能
 | 配置 | `internal/config` 管理 Profile、Alias、行为配置以及 MCP 网络设置与访问 Token；校验已知字段并原子保存 TOML，与 `internal/guiconfig` 共用 `internal/configfile` 保留其他版本写入的未知字段和较高版本号；OAuth 凭据独立保存 |
 | GUI 偏好 | `internal/guiconfig` 独立读取和原子保存 `gui.toml`，按应用外观、终端、Tab 和 MCP 启动行为分组承载主题、终端配色 ID、字体、字号、行高、光标样式与闪烁、右键、多行粘贴警告与回车复制选区等交互、窗口状态和 Tab 顺序/活动项。内置 `terminal-schemes.json` 同时供 Go 校验与前端渲染读取；预览与会话共用终端渲染参数。设置 UI 将终端样式、终端背景图与终端行为拆为同级面板；背景图保存在 `[terminal.background]`，其余共用 `[terminal]`。SSH/SFTP Tab 只保存重连所需描述符，不保存终端输出、目录、传输队列、live session ID 或秘密；该文件不进入 CLI 配置 schema |
 | 系统字体 | `internal/systemfont` 隔离 Windows GDI 与 macOS CoreText 字体枚举，向桌面表现层提供已安装等宽字体族；不支持的平台返回空候选并由前端回退到通用 `monospace` 与手工输入 |
-| 凭据存储 | `internal/credential` 已实现跨平台私有文件后端；ProxyCommand host key 在 Windows/macOS 使用原生凭据存储，在 Linux 使用独立私密文件 |
-| JumpServer 集成 | `internal/jumpserver` 已实现 Organization、Asset、Account、Connection Token 和 `jms://` client-url 协议；`internal/application/connect` 负责资产首个匹配解析、账号选择与连接准备 |
+| 凭据存储 | `internal/credential` 已实现跨平台私有文件后端；OAuth Token 与导入的 Cookie 会话按 Profile 分开保存，Cookie 只用于对应 Profile 的 Origin；ProxyCommand host key 在 Windows/macOS 使用原生凭据存储，在 Linux 使用独立私密文件 |
+| JumpServer 集成 | `internal/jumpserver` 已实现 Organization、Asset、Account、Connection Token 和 `jms://` client-url 协议，同一客户端支持 OAuth Bearer 与导入的 Cookie 会话，Cookie 模式的写请求补充 CSRF 头；`internal/application/connect` 负责资产首个匹配解析、账号选择与连接准备 |
+| Web 终端 | `internal/webterminal` 实现 KoKo v4.0.2 WebSocket 终端协议：Cookie 握手、`CONNECT`／`TERMINAL_INIT`／`TERMINAL_SESSION`、二进制终端数据、窗口变化和心跳；`jumpctl webssh` 以 `web_cli` 连接令牌接入，不经过 SSH 2222 |
 | SSH | `internal/sshclient` 提供 CLI 与 GUI 共用的可注入数据流会话；`internal/application/sshsession` 管理多个 GUI 会话、输入、窗口变化、取消、状态与批量输出；`internal/sshproxy` 将本地 SSH server session 映射到上游 SSH client channel；`internal/sshhostkey` 维护两层主机信任 |
 | SFTP | `internal/sftpclient` 在独立 SSH transport 上打开 SFTP subsystem，复用 gateway 主机信任；`internal/application/sftpsession` 管理目录、文件操作和进程内传输队列，流式 I/O 留在 Go，前端只接收元数据与进度 |
 | 桌面前端 | `cmd/jumpaccess/frontend` 使用 React 和 xterm.js 表现浏览器式 Tab 栏、Profile、Organization、分页 Asset、行内 Alias、GUI 偏好及多会话终端；纯 reducer 管理单例页和可重复 SSH/SFTP Tab，生产环境只通过 Wails 绑定访问应用服务，Vite 开发服务器使用独立的内存预览适配器 |

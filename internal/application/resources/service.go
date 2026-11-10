@@ -3,8 +3,8 @@ package resources
 import (
 	"context"
 	"fmt"
-	authapp "github.com/cmstar/jumpaccess/internal/application/auth"
 
+	authapp "github.com/cmstar/jumpaccess/internal/application/auth"
 	connectapp "github.com/cmstar/jumpaccess/internal/application/connect"
 	projectconfig "github.com/cmstar/jumpaccess/internal/config"
 	"github.com/cmstar/jumpaccess/internal/credential"
@@ -15,19 +15,16 @@ type ConfigLoader interface {
 	Load() (projectconfig.Config, error)
 }
 
-type TokenManager interface {
-	EnsureFresh(context.Context, string) (credential.Token, error)
-}
-
 type API interface {
 	connectapp.AssetAPI
 	ListOrganizations(context.Context) ([]jumpserver.Organization, error)
+	ValidateSession(context.Context) (string, error)
 }
 
 type Service struct {
-	Config ConfigLoader
-	Tokens TokenManager
-	NewAPI func(site, accessToken, organization string) (API, error)
+	Config   ConfigLoader
+	Sessions connectapp.SessionSource
+	NewAPI   func(site string, session credential.Session, organization string) (API, error)
 }
 
 func (s Service) ListOrganizations(ctx context.Context, requestedProfile string) ([]jumpserver.Organization, error) {
@@ -112,15 +109,27 @@ func (s Service) resolveProfile(requested string) (string, projectconfig.Profile
 }
 
 func (s Service) client(ctx context.Context, profile, site, organization string) (API, error) {
-	token, err := s.Tokens.EnsureFresh(ctx, profile)
+	if s.Sessions == nil {
+		return nil, fmt.Errorf("authentication service is unavailable")
+	}
+	session, err := s.Sessions.Ensure(ctx, profile, site)
 	if err != nil {
 		return nil, err
 	}
-	if err := authapp.ValidateTokenSite(token, site); err != nil {
+	if err := authapp.ValidateSessionSite(session, site); err != nil {
 		return nil, err
 	}
 	if s.NewAPI == nil {
 		return nil, fmt.Errorf("JumpServer API client is unavailable")
 	}
-	return s.NewAPI(site, token.AccessToken, organization)
+	api, err := s.NewAPI(site, session, organization)
+	if err != nil {
+		return nil, err
+	}
+	if session.IsCookie() {
+		if _, err := api.ValidateSession(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return api, nil
 }

@@ -104,20 +104,20 @@ type frozenConfig struct{ value config.Config }
 
 func (c frozenConfig) Load() (config.Config, error) { return c.value, nil }
 
-type boundTokens struct {
+type boundSessions struct {
 	source IdentitySource
 	target ResolvedTarget
 }
 
-func (b boundTokens) EnsureFresh(ctx context.Context, profile string) (credential.Token, error) {
+func (b boundSessions) Ensure(ctx context.Context, profile, _ string) (credential.Session, error) {
 	t, err := b.source.EnsureFresh(ctx, profile)
 	if err != nil {
-		return credential.Token{}, err
+		return credential.Session{}, err
 	}
 	if t.LoginID == "" || loginIdentity(t.LoginID) != b.target.CredentialIdentity || auth.ValidateTokenSite(t, b.target.Site) != nil {
-		return credential.Token{}, fault("IDENTITY_CHANGED", "准备连接期间登录身份已改变")
+		return credential.Session{}, fault("IDENTITY_CHANGED", "准备连接期间登录身份已改变")
 	}
-	return t, nil
+	return credential.Session{Token: t}, nil
 }
 
 func (c Connector) Dial(ctx context.Context, r ResolvedTarget) (*ssh.Client, error) {
@@ -170,7 +170,7 @@ func (c Connector) prepareProtocol(ctx context.Context, r ResolvedTarget, protoc
 	cfg.Profiles[r.Profile] = config.Profile{URL: r.Site, Organization: r.Organization}
 	service := c.Connect
 	service.Config = frozenConfig{cfg}
-	service.Tokens = boundTokens{c.Auth, r}
+	service.Sessions = boundSessions{c.Auth, r}
 	prepared, err := service.Prepare(ctx, connect.Options{Target: target.Input{Profile: r.Profile, Organization: r.Organization, Target: r.AssetID, Account: r.AccountID}, Protocol: protocol, NonInteractive: true})
 	if err != nil {
 		if errors.Is(err, auth.ErrLoginRequired) {

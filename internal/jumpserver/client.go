@@ -12,17 +12,24 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/cmstar/jumpaccess/internal/credential"
 )
 
 type Client struct {
-	baseURL     *url.URL
-	accessToken string
-	orgID       string
-	httpClient  *http.Client
-	Timezone    string
+	baseURL    *url.URL
+	session    credential.Session
+	orgID      string
+	httpClient *http.Client
+	Timezone   string
 }
 
 func NewClient(site, accessToken, organization string, httpClient *http.Client) (*Client, error) {
+	return NewSessionClient(site, credential.Session{Token: credential.Token{AccessToken: accessToken}}, organization, httpClient)
+}
+
+// NewSessionClient 按会话中的 OAuth Token 或导入的 Cookie 认证，两者互斥。
+func NewSessionClient(site string, session credential.Session, organization string, httpClient *http.Client) (*Client, error) {
 	parsed, err := url.Parse(site)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return nil, fmt.Errorf("invalid JumpServer URL")
@@ -30,11 +37,16 @@ func NewClient(site, accessToken, organization string, httpClient *http.Client) 
 	if parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
 		return nil, fmt.Errorf("JumpServer URL must contain only scheme and host")
 	}
+	hasToken := session.Token.AccessToken != ""
+	hasCookie := len(session.Cookie.Cookies) > 0
+	if hasToken == hasCookie {
+		return nil, fmt.Errorf("JumpServer session must contain exactly one credential")
+	}
 	parsed.Path = "/"
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	return &Client{baseURL: parsed, accessToken: accessToken, orgID: organization, httpClient: httpClient, Timezone: localTimezone()}, nil
+	return &Client{baseURL: parsed, session: session, orgID: organization, httpClient: httpClient, Timezone: localTimezone()}, nil
 }
 
 func (c *Client) ListOrganizations(ctx context.Context) ([]Organization, error) {
@@ -115,7 +127,9 @@ func (c *Client) CreateConnectionToken(ctx context.Context, request ConnectionRe
 	if request.Protocol != "ssh" && request.Protocol != "sftp" {
 		return "", fmt.Errorf("connection protocol %q is not supported", request.Protocol)
 	}
-	request.ConnectMethod = request.Protocol + "_client"
+	if request.ConnectMethod == "" {
+		request.ConnectMethod = request.Protocol + "_client"
+	}
 	request.ConnectOptions = ConnectionOptions{TokenReusable: false, DisableAutoHash: false}
 	var response json.RawMessage
 	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/authentication/connection-token/", request, http.StatusCreated, &response); err != nil {
@@ -166,7 +180,18 @@ func (c *Client) doJSON(ctx context.Context, method, requestPath string, body an
 	if err != nil {
 		return fmt.Errorf("create JumpServer API request: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+c.accessToken)
+	if c.session.IsCookie() {
+		request.Header.Set("Cookie", c.session.Cookie.Header())
+		// JumpServer 的 Session 认证会校验 CSRF，失败时静默降级为未认证。
+		if request.Method != http.MethodGet && request.Method != http.MethodHead && request.Method != http.MethodOptions {
+			if c.session.Cookie.CSRFToken == "" {
+				return fmt.Errorf("cookie session has no CSRF token; re-import the browser Cookie header including csrftoken")
+			}
+			request.Header.Set("X-CSRFToken", c.session.Cookie.CSRFToken)
+		}
+	} else {
+		request.Header.Set("Authorization", "Bearer "+c.session.Token.AccessToken)
+	}
 	request.Header.Set("Accept", "application/json")
 	request.Header.Set("Referer", c.baseURL.String())
 	request.Header.Set("X-TZ", c.Timezone)
@@ -182,6 +207,9 @@ func (c *Client) doJSON(ctx context.Context, method, requestPath string, body an
 	}
 	defer response.Body.Close()
 	if response.StatusCode != expectedStatus {
+		if code := errorCode(response.Body); code != "" {
+			return fmt.Errorf("JumpServer API %s %s returned HTTP %d (%s)", method, endpoint.Path, response.StatusCode, code)
+		}
 		return fmt.Errorf("JumpServer API %s %s returned HTTP %d", method, endpoint.Path, response.StatusCode)
 	}
 	if target == nil {
@@ -191,6 +219,38 @@ func (c *Client) doJSON(ctx context.Context, method, requestPath string, body an
 		return fmt.Errorf("decode JumpServer API response: %w", err)
 	}
 	return nil
+}
+
+// errorCode 只返回服务端错误码。响应正文可能回显请求内容，不能整体写入错误信息。
+func errorCode(body io.Reader) string {
+	data, err := io.ReadAll(io.LimitReader(body, 1024))
+	if err != nil {
+		return ""
+	}
+	var payload struct {
+		Code string `json:"code"`
+	}
+	if json.Unmarshal(data, &payload) != nil || !validErrorCode(payload.Code) {
+		return ""
+	}
+	return payload.Code
+}
+
+// validErrorCode 只接受小写标识符形状的错误码，避免把任意文本带入输出。
+func validErrorCode(code string) bool {
+	if len(code) == 0 || len(code) > 64 {
+		return false
+	}
+	for index, character := range code {
+		switch {
+		case character >= 'a' && character <= 'z':
+		case character == '_':
+		case character >= '0' && character <= '9' && index > 0:
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func setIfNotEmpty(values url.Values, key, value string) {

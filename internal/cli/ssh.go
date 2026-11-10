@@ -16,7 +16,14 @@ func newSSHCommand(deps Dependencies) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "ssh <target>",
 		Short: "Open an interactive SSH session through JumpServer",
-		Args:  cobra.ExactArgs(1),
+		Long: `Open an interactive SSH session to an asset through the JumpServer SSH gateway.
+
+The target is a profile alias first, then an asset ID, name, or address. Unknown
+gateway host keys are confirmed once and stored in known_hosts. Without --account,
+multiple permitted accounts prompt for a choice.`,
+		Example: `  jumpctl ssh web --profile work
+  jumpctl ssh 10.0.0.10 --account root --profile work`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if deps.Connect == nil || deps.RunSSH == nil {
 				return fmt.Errorf("SSH service is unavailable")

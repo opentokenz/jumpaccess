@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 
@@ -23,6 +24,8 @@ import (
 	"github.com/cmstar/jumpaccess/internal/stdioconn"
 	"github.com/cmstar/jumpaccess/internal/systemopen"
 	"github.com/cmstar/jumpaccess/internal/terminalprompt"
+	"github.com/cmstar/jumpaccess/internal/webterminal"
+	"github.com/gorilla/websocket"
 )
 
 var version = "dev"
@@ -71,7 +74,12 @@ func run() int {
 		Stderr:      os.Stderr,
 		Credentials: core.Tokens,
 		Auth:        authService,
+		Cookies:     core.Cookies,
+		ReadSecret: func(prompt string, output io.Writer) (string, error) {
+			return terminalprompt.ReadSecret(os.Stdin, output, prompt)
+		},
 		Connect:     core.Connect,
+		WebTerminal: core.Connect,
 		Resources:   core.Resources,
 		MCP:         core.NewMCP("cli"),
 		MCPSettings: core.MCPSettings,
@@ -100,6 +108,29 @@ func run() int {
 				DownloadDirectory: options.DownloadDirectory,
 				Timeout:           configuration.Behavior.ConnectTimeout.Duration,
 			}).Run(ctx, prepared.Connection)
+		},
+		RunWebTerminal: func(ctx context.Context, prepared connectapp.WebTerminal, options cli.WebSSHOptions) error {
+			endpoint, err := webterminal.Endpoint(prepared.Selection.SiteURL, prepared.TokenID)
+			if err != nil {
+				return err
+			}
+			account := prepared.Account.Username
+			if account == "" {
+				account = prepared.Account.ID
+			}
+			return webterminal.RunTTY(ctx, webterminal.TTYOptions{
+				URL:     endpoint,
+				Cookie:  prepared.Cookie,
+				Asset:   prepared.Asset.Name,
+				Account: account,
+				Stdin:   os.Stdin,
+				Stdout:  os.Stdout,
+				Stderr:  os.Stderr,
+				Dialer:  &websocket.Dialer{HandshakeTimeout: configuration.Behavior.ConnectTimeout.Duration},
+
+				Transfer:          true,
+				DownloadDirectory: options.DownloadDirectory,
+			})
 		},
 		RunProxy: func(ctx context.Context, prepared connectapp.Prepared) error {
 			callback, err := (sshhostkey.Store{Path: filepath.Join(rootDir, "known_hosts")}).Callback(ctx, false)

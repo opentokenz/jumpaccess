@@ -39,7 +39,7 @@ jumpctl alias set web --asset <asset-id> --account <account-id> --organization <
 jumpctl ssh web
 ```
 
-浏览器登录由 `auth login` 单独完成。真实账号、MFA 和密码不应作为命令参数传递；授权在系统浏览器中进行，OAuth Token 按 Profile 保存到应用根目录内受严格权限保护的 `credentials` 子目录。当前开发版本默认要求粘贴手工回调；正式发布版计划默认注册并接收 `jms` 私有协议，同时永久保留 `--manual` 作为显式回退方式。
+浏览器登录由 `auth login` 单独完成。无法使用 OAuth Discovery 的站点改用 `jumpctl auth import-cookie` 和 `jumpctl webssh`，见下文 [Web 终端（KoKo）](#web-终端koko)。真实账号、MFA 和密码不应作为命令参数传递；授权在系统浏览器中进行，OAuth Token 按 Profile 保存到应用根目录内受严格权限保护的 `credentials` 子目录。当前开发版本默认要求粘贴手工回调；正式发布版计划默认注册并接收 `jms` 私有协议，同时永久保留 `--manual` 作为显式回退方式。
 
 ## 通用命令
 
@@ -101,9 +101,11 @@ account = "account-id"
 | 命令 | 作用 |
 | --- | --- |
 | `jumpctl auth login [--profile <name>] [--manual] [--no-browser]` | 完成 Authorization Code + PKCE 登录；默认打开浏览器，`--manual` 强制手工粘贴回调（当前版本也是默认方式），`--no-browser` 跳过打开浏览器并等待粘贴回调 |
-| `jumpctl auth status [--profile <name>]` | 只显示登录状态、过期时间和是否有 Refresh Token，不显示秘密 |
+| `jumpctl auth status [--profile <name>]` | 只显示登录状态、过期时间和是否有 Refresh Token；没有 OAuth 凭据但已导入 Cookie 时显示导入时间与最近校验时间；不显示秘密 |
+| `jumpctl auth check [--profile <name>]` | 立即调用用户资料接口验证当前会话；OAuth 会按需刷新，Cookie 校验成功后记录校验时间 |
 | `jumpctl auth refresh [--profile <name>]` | 立即刷新；Refresh Token 轮换后原子写回该 Profile 的凭据文件 |
-| `jumpctl auth logout [--profile <name>]` | 撤销并删除 Profile 的 OAuth 凭据 |
+| `jumpctl auth import-cookie [--profile <name>]` | 隐藏读取并验证浏览器 Cookie 会话，保存为 Profile 的 Cookie 凭据 |
+| `jumpctl auth logout [--profile <name>]` | 撤销并删除 Profile 的 OAuth 凭据，同时删除导入的 Cookie 会话 |
 
 本机无法打开浏览器，或希望在另一台电脑完成授权时，运行：
 
@@ -127,6 +129,28 @@ Linux 默认通过 `xdg-open` 启动浏览器，接收回调无需等待浏览�
 - 浏览器地址栏中带有 `next=jms%3A...` 的完整 JumpServer 确认页 URL。
 
 程序只接受目标严格匹配 `jms://auth/callback` 且 `state` 与当前登录流程一致的回调。Authorization Code 只用于当前 Token 交换，不会写入配置或普通输出。
+
+## Web 终端（KoKo）
+
+OAuth 不可用且 JumpServer SSH 端口不可达时，可以用浏览器 Cookie 会话接入 KoKo 的 HTTP WebSocket 终端。
+
+```text
+jumpctl auth import-cookie [--profile <name>]
+jumpctl webssh <target> [--profile <name>] [--organization <org>] [--account <account>] [--download-dir <dir>]
+```
+
+`import-cookie` 从终端隐藏读取浏览器开发者工具中的 Cookie 请求头（例如 `jms_sessionid=...; jms_csrftoken=...`），立即用用户资料接口验证；验证失败时不保存。Cookie 只写入该 Profile 的私有凭据存储，不进入 `config.toml`，也不回显或打印。缺少 `csrftoken` 时会提示，因为申请连接令牌的写请求需要 CSRF 校验。
+
+`webssh` 的目标解析、Alias 和 Account 选择规则与 `jumpctl ssh` 一致。命令申请 `connect_method=web_cli` 的连接令牌后连接 KoKo WebSocket 终端，收到会话信息时输出 `Connected: <asset> / <account>`；退出、断开或出错后恢复本地终端状态。
+
+终端流上的 ZMODEM 识别与 `jumpctl ssh` 相同：在远端执行 `rz` 上传，执行 `sz <file>` 下载；本地路径提示、进度、同名保护和取消沿用同一实现。`--download-dir` 指定下载目录，未指定时使用系统下载目录。传输由远端命令发起，远端需要安装 `rz` / `sz`，不支持 SFTP 或任意文件 API。
+
+限制：
+
+- 只支持 Cookie 会话；Profile 只有 OAuth 凭据时提示先执行 `import-cookie`。
+- 传输的是终端字节流，不提供端口转发、SFTP 或任意 TCP 隧道；文件传输只在远端执行 `rz` / `sz` 时通过 ZMODEM 进行。
+- Cookie 会话过期、服务端注销或在别处重新登录后需要重新导入。
+- 站点使用 HTTP 时，Cookie 与终端内容在内网明文传输，VPN 不能替代 HTTPS。
 
 ## MCP Server
 

@@ -15,7 +15,17 @@ func newProxyCommand(deps Dependencies) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "proxy <target>",
 		Short: "Serve an SSH ProxyCommand connection over standard I/O",
-		Args:  cobra.ExactArgs(1),
+		Long: `Serve one SSH connection for a client ProxyCommand over standard I/O.
+
+stdout carries only SSH protocol bytes; diagnostics go to stderr. This mode never
+prompts: resolve the account with an alias or --account, and confirm an unknown
+gateway host key once with "jumpctl ssh".`,
+		Example: `  # ~/.ssh/config
+  Host production-web
+      HostName web
+      User jumpaccess
+      ProxyCommand jumpctl proxy %h`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if deps.Connect == nil || deps.RunProxy == nil {
 				return fmt.Errorf("ProxyCommand service is unavailable")

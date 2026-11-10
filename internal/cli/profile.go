@@ -17,13 +17,18 @@ func newProfileCommand(deps Dependencies) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "profile",
 		Short: "Manage JumpServer profiles",
+		Long: `Manage JumpServer profiles.
+
+A profile holds a server URL, an optional organization, and local aliases.
+The first added profile becomes the current profile.`,
 	}
 
 	var siteURL string
 	add := &cobra.Command{
-		Use:   "add <name>",
-		Short: "Add a JumpServer profile",
-		Args:  cobra.ExactArgs(1),
+		Use:     "add <name>",
+		Short:   "Add a JumpServer profile",
+		Example: `  jumpctl profile add work --url https://jump.example.com`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			service := settings.Service{Store: deps.Store, Credentials: deps.Credentials}
 			if err := service.AddProfile(args[0], siteURL); err != nil {
@@ -124,9 +129,10 @@ func newProfileCommand(deps Dependencies) *cobra.Command {
 		},
 	})
 	command.AddCommand(&cobra.Command{
-		Use:   "use <name>",
-		Short: "Select the current JumpServer profile",
-		Args:  cobra.ExactArgs(1),
+		Use:     "use <name>",
+		Short:   "Select the current JumpServer profile",
+		Example: `  jumpctl profile use work`,
+		Args:    cobra.ExactArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			return (settings.Service{Store: deps.Store}).UseProfile(args[0])
 		},

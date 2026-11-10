@@ -4,7 +4,7 @@
 
 ## 业务场景
 
-JumpAccess 面向需要通过 JumpServer 访问远程 Asset 的用户。用户先独立完成 OAuth 登录，之后可以使用桌面 GUI 或 `jumpctl` 建立直接 SSH 会话，也可以让支持 SSH `ProxyCommand` 的客户端调用 `jumpctl` 作为连接通道。GUI 不提供代理能力。
+JumpAccess 面向需要通过 JumpServer 访问远程 Asset 的用户。用户先独立完成 OAuth 登录，之后可以使用桌面 GUI 或 `jumpctl` 建立直接 SSH 会话，也可以让支持 SSH `ProxyCommand` 的客户端调用 `jumpctl` 作为连接通道。无法使用 OAuth Discovery 的站点可以改为导入浏览器 Cookie 会话，并通过 `jumpctl webssh` 使用 KoKo Web 终端。GUI 不提供代理能力。
 
 JumpAccess 负责认证、资源发现、目标解析和连接编排；JumpServer 仍然是用户授权、Organization、Asset、Account 及会话访问策略的权威来源。
 
@@ -56,6 +56,8 @@ GUI 的 Profile 卡片在右上角提供“启用”按钮，当前 Profile 显�
 Refresh Token 已失效时，需要用户重新执行交互登录；在凭据变化前，GUI 不重复尝试同一份已确认失效的 Refresh Token。Proxy 模式本身不打开浏览器。
 
 当前 GUI 登录会打开系统浏览器，并要求用户把 JumpServer 确认页中的 `jms://` 链接或完整确认页 URL 粘贴回应用。登录尝试的 state 与 PKCE verifier 只保存在当前 GUI 进程内；私有协议注册与跨进程回调尚未实现。
+
+没有可用 OAuth Discovery 的站点可以执行 `jumpctl auth import-cookie`，把浏览器 Cookie 作为该 Profile 的登录凭据。Cookie 会话写入同一个私有凭据存储，与 OAuth Token 分开存放，只发送到该 Profile 的 JumpServer Origin，不参与 OAuth 刷新，也不写入 TOML。存在 OAuth 凭据的 Profile 仍按 OAuth 处理；Cookie 只在 OAuth 凭据缺失时生效。Cookie 过期或退出登录后需要重新导入。
 
 ### 目标解析
 

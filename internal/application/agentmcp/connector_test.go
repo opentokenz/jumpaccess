@@ -37,7 +37,7 @@ func TestConnectorFreezesIdentityAndRejectsAmbiguousAlias(t *testing.T) {
 	}
 	identity.login = "two"
 	assertFault(t, c.Validate(ctx, target), "IDENTITY_CHANGED")
-	_, err = (boundTokens{source: identity, target: target}).EnsureFresh(ctx, "agent")
+	_, err = (boundSessions{source: identity, target: target}).Ensure(ctx, "agent", target.Site)
 	assertFault(t, err, "IDENTITY_CHANGED")
 	identity.login = "one"
 	if err := s.Store.Update(ctx, func(cfg *config.Config) error {

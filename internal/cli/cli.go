@@ -17,26 +17,32 @@ import (
 )
 
 type Dependencies struct {
-	Version       string
-	Licenses      string
-	ConfigPath    string
-	Store         projectconfig.Store
-	OpenFile      func(string) error
-	Stdin         io.Reader
-	Stdout        io.Writer
-	Stderr        io.Writer
-	Credentials   CredentialRemover
-	Auth          AuthService
-	Resources     ResourceService
-	Connect       ConnectionPreparer
-	MCP           *agentmcp.Runtime
-	MCPSettings   agentmcp.Settings
-	RunSSH        func(context.Context, connectapp.Prepared, SSHOptions) error
-	RunProxy      func(context.Context, connectapp.Prepared) error
-	SelectAccount func([]jumpserver.Account) (jumpserver.Account, error)
+	Version        string
+	Licenses       string
+	ConfigPath     string
+	Store          projectconfig.Store
+	OpenFile       func(string) error
+	Stdin          io.Reader
+	Stdout         io.Writer
+	Stderr         io.Writer
+	Credentials    CredentialRemover
+	Auth           AuthService
+	Cookies        CookieImporter
+	ReadSecret     func(prompt string, output io.Writer) (string, error)
+	Resources      ResourceService
+	Connect        ConnectionPreparer
+	WebTerminal    WebTerminalPreparer
+	MCP            *agentmcp.Runtime
+	MCPSettings    agentmcp.Settings
+	RunSSH         func(context.Context, connectapp.Prepared, SSHOptions) error
+	RunWebTerminal func(context.Context, connectapp.WebTerminal, WebSSHOptions) error
+	RunProxy       func(context.Context, connectapp.Prepared) error
+	SelectAccount  func([]jumpserver.Account) (jumpserver.Account, error)
 }
 
 type SSHOptions struct{ DownloadDirectory string }
+
+type WebSSHOptions struct{ DownloadDirectory string }
 
 type CredentialRemover interface {
 	Delete(string) error
@@ -44,6 +50,7 @@ type CredentialRemover interface {
 
 type AuthService interface {
 	Login(ctx context.Context, profile string, options authapp.LoginOptions) (authapp.Status, error)
+	Check(ctx context.Context, profile string) (authapp.CheckResult, error)
 	Status(profile string) (authapp.Status, error)
 	Refresh(ctx context.Context, profile string) (authapp.Status, error)
 	Logout(ctx context.Context, profile string) error
@@ -51,6 +58,15 @@ type AuthService interface {
 
 type ConnectionPreparer interface {
 	Prepare(context.Context, connectapp.Options) (connectapp.Prepared, error)
+}
+
+type WebTerminalPreparer interface {
+	PrepareWebTerminal(context.Context, connectapp.Options) (connectapp.WebTerminal, error)
+}
+
+// CookieImporter 保存浏览器 Cookie 会话；原始 Cookie 只在此接口内传递。
+type CookieImporter interface {
+	Import(context.Context, string, string) (authapp.CookieStatus, error)
 }
 
 type ResourceService interface {
@@ -68,8 +84,23 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	}
 
 	root := &cobra.Command{
-		Use:           "jumpctl",
-		Short:         "Access JumpServer assets from the command line",
+		Use:   "jumpctl",
+		Short: "Access JumpServer assets from the command line",
+		Long: `Access JumpServer assets from the command line.
+
+Profiles hold a JumpServer URL, an optional organization, and local aliases.
+Commands use the current profile unless --profile is given. Authentication is
+either OAuth ("jumpctl auth login") or an imported browser cookie
+("jumpctl auth import-cookie") for servers without OAuth discovery.
+
+For scripts and agents, pass --profile, --organization, and --account explicitly
+to avoid prompts. Results go to stdout, diagnostics to stderr.
+
+Exit status: 0 on success, 1 on failure. Full reference: docs/cli.md.`,
+		Example: `  jumpctl profile add work --url https://jump.example.com
+  jumpctl auth import-cookie --profile work
+  jumpctl asset list --profile work --search web
+  jumpctl webssh web-01 --account root --profile work`,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 	}
@@ -97,6 +128,10 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	configCommand := &cobra.Command{
 		Use:   "config",
 		Short: "Inspect and edit the JumpAccess configuration",
+		Long: `Inspect and validate config.toml.
+
+Credentials are stored separately in the protected credential store; config.toml
+contains only profiles, aliases, and behavior settings.`,
 	}
 	configCommand.AddCommand(&cobra.Command{
 		Use:   "path",
@@ -142,6 +177,7 @@ func NewRoot(deps Dependencies) *cobra.Command {
 	root.AddCommand(newAliasCommand(deps))
 	root.AddCommand(newAuthCommand(deps))
 	root.AddCommand(newSSHCommand(deps))
+	root.AddCommand(newWebSSHCommand(deps))
 	root.AddCommand(newProxyCommand(deps))
 	root.AddCommand(newMCPCommand(deps))
 	for _, command := range newResourceCommands(deps) {
